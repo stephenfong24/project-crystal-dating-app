@@ -1,0 +1,6 @@
+{
+  "name": "Date With Me? · Interactive Date Invitation",
+  "description": "An interactive dating proposal app with an evasive No button, customizable invitation link, and complete date planner with calendar integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
