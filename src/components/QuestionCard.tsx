@@ -35,31 +35,97 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [noPosition, setNoPosition] = useState<{ x: number; y: number } | null>(null);
   const [currentMessage, setCurrentMessage] = useState<string>('');
   const [isDodging, setIsDodging] = useState(false);
+  const [isExploding, setIsExploding] = useState(false);
+  const [isBlownUp, setIsBlownUp] = useState(false);
+  const [explosionCoords, setExplosionCoords] = useState<{ x: number; y: number } | null>(null);
+  const [showBlastEffect, setShowBlastEffect] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const noBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Function to move the "No" button to a random spot across the screen/viewport
-  const moveNoButton = useCallback(() => {
+  // Trigger the dramatic blow-up explosion sequence
+  const triggerBlowUp = useCallback(() => {
+    if (isExploding || isBlownUp) return;
+
+    // Get current button coordinates for the explosion center
+    let blastX = window.innerWidth / 2;
+    let blastY = window.innerHeight / 2;
+    if (noBtnRef.current) {
+      const rect = noBtnRef.current.getBoundingClientRect();
+      blastX = rect.left + rect.width / 2;
+      blastY = rect.top + rect.height / 2;
+    } else if (noPosition) {
+      blastX = noPosition.x + 55;
+      blastY = noPosition.y + 24;
+    }
+
+    setExplosionCoords({ x: blastX, y: blastY });
+    setIsExploding(true);
+    setCurrentMessage('⚠️ OVERHEATING! 💥');
+
+    // Stage 1: Shaking and ticking warning for 350ms, then KABOOM!
+    setTimeout(() => {
+      sounds.playExplosion();
+      setIsExploding(false);
+      setIsBlownUp(true);
+      setShowBlastEffect(true);
+
+      // Canvas confetti fire/smoke explosion at exact button coordinates
+      const originX = Math.max(0.05, Math.min(0.95, blastX / window.innerWidth));
+      const originY = Math.max(0.05, Math.min(0.95, blastY / window.innerHeight));
+
+      confetti({
+        particleCount: 80,
+        spread: 90,
+        startVelocity: 38,
+        origin: { x: originX, y: originY },
+        colors: ['#ff1744', '#ff5722', '#ff9800', '#ffeb3b', '#263238', '#f8bbd0'],
+      });
+
+      // Extra secondary shockwave
+      setTimeout(() => {
+        confetti({
+          particleCount: 40,
+          spread: 120,
+          startVelocity: 22,
+          origin: { x: originX, y: originY },
+          colors: ['#f43f5e', '#fb7185', '#cbd5e1'],
+        });
+      }, 120);
+
+      // Hide temporary blast particle elements after animation finishes
+      setTimeout(() => {
+        setShowBlastEffect(false);
+      }, 2500);
+    }, 400);
+  }, [isExploding, isBlownUp, noPosition]);
+
+  // Main interaction handler: if user tries to click/interact more than 2 times, BLOW IT UP!
+  const handleNoInteraction = useCallback(() => {
+    if (isBlownUp || isExploding) return;
+
+    // If user has already tried 2 times, this attempt is "more than 2 times" -> BLOW UP!
+    if (evadeCount >= 2) {
+      triggerBlowUp();
+      return;
+    }
+
+    // Otherwise fly away normally
     sounds.playWhoosh();
 
     const padding = 60;
     const btnWidth = noBtnRef.current?.offsetWidth || 110;
     const btnHeight = noBtnRef.current?.offsetHeight || 48;
 
-    // Viewport dimensions
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // Calculate maximum available coordinates
     const maxX = Math.max(10, vw - btnWidth - padding);
     const maxY = Math.max(10, vh - btnHeight - padding);
 
-    // Generate random coordinates within bounds
     let randomX = Math.floor(Math.random() * (maxX - padding)) + padding;
     let randomY = Math.floor(Math.random() * (maxY - padding)) + padding;
 
-    // Keep it away from the top navigation bar (64px)
     if (randomY < 80) randomY = 90;
 
     setNoPosition({ x: randomX, y: randomY });
@@ -72,32 +138,32 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
     setIsDodging(true);
     setTimeout(() => setIsDodging(false), 200);
-  }, []);
+  }, [evadeCount, isBlownUp, isExploding, triggerBlowUp]);
 
-  // Proximity evasion: if mouse cursor gets within 85px of the No button, evade automatically!
+  // Proximity evasion / explosion trigger
   useEffect(() => {
+    if (isBlownUp || isExploding) return;
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!noBtnRef.current) return;
+      if (!noBtnRef.current || isBlownUp || isExploding) return;
       const rect = noBtnRef.current.getBoundingClientRect();
       const btnCenterX = rect.left + rect.width / 2;
       const btnCenterY = rect.top + rect.height / 2;
 
       const distance = Math.hypot(e.clientX - btnCenterX, e.clientY - btnCenterY);
 
-      // If user comes dangerously close (< 85px) and isn't currently moving, dodge!
-      if (distance < 85) {
-        moveNoButton();
+      if (distance < 80) {
+        handleNoInteraction();
       }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, [moveNoButton]);
+  }, [handleNoInteraction, isBlownUp, isExploding]);
 
   const handleYesClick = () => {
     sounds.playYesChime();
 
-    // Trigger full screen celebratory confetti
     confetti({
       particleCount: 100,
       spread: 70,
@@ -105,7 +171,6 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       colors: ['#f43f5e', '#ec4899', '#fb7185', '#fda4af', '#f472b6', '#ffd1dc'],
     });
 
-    // Second wave confetti
     setTimeout(() => {
       confetti({
         particleCount: 60,
@@ -126,7 +191,17 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     onSelectYes();
   };
 
-  const yesScale = Math.min(1 + evadeCount * 0.05, 1.35);
+  const handleReviveButton = () => {
+    sounds.playPop();
+    setIsBlownUp(false);
+    setIsExploding(false);
+    setShowBlastEffect(false);
+    setNoPosition(null);
+    setEvadeCount(0);
+    setCurrentMessage('');
+  };
+
+  const yesScale = isBlownUp ? 1.25 : Math.min(1 + evadeCount * 0.07, 1.35);
 
   return (
     <div
@@ -163,21 +238,42 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           {customQuestion || 'Do you want to date with me?'}
         </h1>
 
-        <p className="text-slate-600 text-sm sm:text-base max-w-md mx-auto mb-8 leading-relaxed">
-          {evadeCount > 0 ? (
-            <span className="text-rose-600 font-medium">
-              You tried to click &apos;No&apos; {evadeCount} {evadeCount === 1 ? 'time' : 'times'}! But fate has other plans... 💕
-            </span>
+        {/* Dynamic status feedback */}
+        <div className="min-h-[48px] flex items-center justify-center mb-8">
+          {isBlownUp ? (
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-sm font-medium flex items-center gap-2 shadow-xs"
+            >
+              <span className="text-xl">💥</span>
+              <span>
+                <strong>BOOM!</strong> The &quot;No&quot; button literally blew up! There is only one choice left in the universe! 💕
+              </span>
+            </motion.div>
           ) : (
-            'Choose carefully... there is truly only one right answer waiting for you. ✨'
+            <p className="text-slate-600 text-sm sm:text-base max-w-md mx-auto leading-relaxed">
+              {evadeCount > 0 ? (
+                <span className="text-rose-600 font-medium">
+                  Attempt {evadeCount} of 2... Careful! Trying to click &apos;No&apos; more than 2 times might cause it to blow up! 💣
+                </span>
+              ) : (
+                'Choose carefully... there is truly only one right answer waiting for you. ✨'
+              )}
+            </p>
           )}
-        </p>
+        </div>
 
         {/* The Buttons Area */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 min-h-[56px] relative">
           {/* YES Button */}
           <motion.button
-            animate={{ scale: yesScale }}
+            animate={{
+              scale: yesScale,
+              boxShadow: isBlownUp
+                ? '0 20px 30px -10px rgba(244, 63, 94, 0.45)'
+                : '0 10px 20px -5px rgba(244, 63, 94, 0.3)',
+            }}
             whileHover={{ scale: yesScale * 1.05 }}
             whileTap={{ scale: yesScale * 0.96 }}
             transition={{ type: 'spring', stiffness: 400, damping: 20 }}
@@ -185,26 +281,28 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-semibold rounded-2xl shadow-lg shadow-rose-300/50 hover:shadow-xl hover:shadow-rose-400/50 transition-all flex items-center justify-center gap-2 cursor-pointer z-10 whitespace-nowrap"
           >
             <Sparkles className="w-5 h-5 text-rose-100" />
-            <span className="text-base sm:text-lg">Yes, I’d love to!</span>
+            <span className="text-base sm:text-lg">
+              {isBlownUp ? 'YES! (Only Option Left)' : 'Yes, I’d love to!'}
+            </span>
             <Heart className="w-5 h-5 fill-white text-white" />
           </motion.button>
 
-          {/* Initial Static Placement Placeholder for NO button */}
-          {!noPosition && (
+          {/* Initial Static Placement Placeholder for NO button (if not flying and not blown up) */}
+          {!noPosition && !isBlownUp && (
             <button
               ref={noBtnRef}
-              onMouseEnter={moveNoButton}
+              onMouseEnter={handleNoInteraction}
               onTouchStart={(e) => {
                 e.preventDefault();
-                moveNoButton();
+                handleNoInteraction();
               }}
               onPointerDown={(e) => {
                 e.preventDefault();
-                moveNoButton();
+                handleNoInteraction();
               }}
               onClick={(e) => {
                 e.preventDefault();
-                moveNoButton();
+                handleNoInteraction();
               }}
               className="w-full sm:w-auto px-7 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-2xl border border-slate-200 transition-colors cursor-pointer whitespace-nowrap"
             >
@@ -213,18 +311,32 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           )}
         </div>
 
-        {/* Evasion Counter Pill / Status */}
-        {evadeCount > 0 && (
-          <div className="mt-8 pt-4 border-t border-rose-50 flex items-center justify-center gap-2 text-xs text-slate-500">
-            <span>Dodges: <strong className="text-rose-600 font-semibold">{evadeCount}</strong></span>
-            <span aria-hidden="true">·</span>
-            <span>Speed: <strong className="text-slate-700">Untouchable</strong></span>
-          </div>
-        )}
+        {/* Evasion Counter / Status Footer */}
+        <div className="mt-8 pt-4 border-t border-rose-50 flex items-center justify-center gap-2 text-xs text-slate-500">
+          {isBlownUp ? (
+            <button
+              type="button"
+              onClick={handleReviveButton}
+              className="text-rose-600 hover:text-rose-700 font-medium underline underline-offset-4 cursor-pointer"
+            >
+              Want to blow it up again? Reset No button 🔄
+            </button>
+          ) : (
+            <>
+              <span>
+                Dodges: <strong className="text-rose-600 font-semibold">{evadeCount}</strong> / 2
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>
+                Destiny: <strong className="text-slate-700">Inevitable</strong>
+              </span>
+            </>
+          )}
+        </div>
       </motion.div>
 
-      {/* FLYING NO BUTTON (When activated, positioned fixed across the whole screen) */}
-      {noPosition && (
+      {/* FLYING NO BUTTON (When activated & not yet blown up) */}
+      {noPosition && !isBlownUp && (
         <motion.div
           style={{
             position: 'fixed',
@@ -233,56 +345,151 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             zIndex: 50,
           }}
           initial={false}
-          animate={{
-            x: 0,
-            y: 0,
-            rotate: isDodging ? (Math.random() > 0.5 ? 12 : -12) : 0,
-          }}
-          transition={{
-            type: 'spring',
-            stiffness: 450,
-            damping: 26,
-            mass: 0.8,
-          }}
+          animate={
+            isExploding
+              ? {
+                  x: [0, -6, 6, -8, 8, -4, 4, 0],
+                  y: [0, 4, -4, 6, -6, 3, -3, 0],
+                  scale: [1, 1.15, 1.25, 1.35],
+                  rotate: [0, -12, 12, -18, 18, 0],
+                }
+              : {
+                  x: 0,
+                  y: 0,
+                  rotate: isDodging ? (Math.random() > 0.5 ? 12 : -12) : 0,
+                }
+          }
+          transition={
+            isExploding
+              ? { duration: 0.38, repeat: Infinity }
+              : { type: 'spring', stiffness: 450, damping: 26, mass: 0.8 }
+          }
           className="relative inline-block pointer-events-auto"
         >
-          {/* Speech bubble / Reaction badge above the evasive No button */}
+          {/* Reaction message speech bubble above the No button */}
           <AnimatePresence mode="wait">
             {currentMessage && (
               <motion.div
-                key={evadeCount}
+                key={isExploding ? 'exploding' : evadeCount}
                 initial={{ opacity: 0, y: 10, scale: 0.8 }}
                 animate={{ opacity: 1, y: -8, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
                 transition={{ duration: 0.2 }}
-                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-lg whitespace-nowrap shadow-md pointer-events-none"
+                className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2.5 py-1 text-[11px] font-bold rounded-lg whitespace-nowrap shadow-md pointer-events-none ${
+                  isExploding ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-900 text-white'
+                }`}
               >
                 {currentMessage}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+                <div
+                  className={`absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent ${
+                    isExploding ? 'border-t-red-600' : 'border-t-slate-900'
+                  }`}
+                />
               </motion.div>
             )}
           </AnimatePresence>
 
           <button
             ref={noBtnRef}
-            onMouseEnter={moveNoButton}
+            onMouseEnter={handleNoInteraction}
             onTouchStart={(e) => {
               e.preventDefault();
-              moveNoButton();
+              handleNoInteraction();
             }}
             onPointerDown={(e) => {
               e.preventDefault();
-              moveNoButton();
+              handleNoInteraction();
             }}
             onClick={(e) => {
               e.preventDefault();
-              moveNoButton();
+              handleNoInteraction();
             }}
-            className="px-6 py-3 bg-white text-slate-700 font-medium rounded-2xl shadow-xl border border-rose-200 hover:border-rose-400 transition-all cursor-pointer whitespace-nowrap text-sm flex items-center gap-1.5"
+            className={`px-6 py-3 font-medium rounded-2xl shadow-xl transition-all cursor-pointer whitespace-nowrap text-sm flex items-center gap-1.5 ${
+              isExploding
+                ? 'bg-red-500 text-white border-2 border-yellow-300 ring-4 ring-red-400 shadow-red-500/50'
+                : 'bg-white text-slate-700 border border-rose-200 hover:border-rose-400'
+            }`}
           >
-            <span>No 🏃💨</span>
+            <span>{isExploding ? '💥 BOOM! 💥' : 'No 🏃💨'}</span>
           </button>
         </motion.div>
+      )}
+
+      {/* EPIC EXPLOSION SHOCKWAVE & DEBRIS PARTICLES EFFECT */}
+      {showBlastEffect && explosionCoords && (
+        <div
+          style={{
+            position: 'fixed',
+            left: `${explosionCoords.x}px`,
+            top: `${explosionCoords.y}px`,
+            zIndex: 60,
+            pointerEvents: 'none',
+          }}
+        >
+          {/* Expanding shockwave ring 1 */}
+          <motion.div
+            initial={{ scale: 0.2, opacity: 1, borderWidth: '8px' }}
+            animate={{ scale: 3.5, opacity: 0, borderWidth: '1px' }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            className="absolute -top-12 -left-12 w-24 h-24 rounded-full border-red-500 bg-orange-400/20"
+          />
+
+          {/* Expanding shockwave ring 2 */}
+          <motion.div
+            initial={{ scale: 0.1, opacity: 1, borderWidth: '12px' }}
+            animate={{ scale: 2.8, opacity: 0, borderWidth: '2px' }}
+            transition={{ duration: 0.45, ease: 'easeOut' }}
+            className="absolute -top-10 -left-10 w-20 h-20 rounded-full border-yellow-400 bg-yellow-300/30"
+          />
+
+          {/* Central Comic "💥 KABOOM!" badge */}
+          <motion.div
+            initial={{ scale: 0, rotate: -25, opacity: 1 }}
+            animate={{ scale: [0, 1.4, 1.1], rotate: [0, 10, -5], opacity: [1, 1, 0] }}
+            transition={{ duration: 0.9, times: [0, 0.4, 1] }}
+            className="absolute -translate-x-1/2 -translate-y-1/2 px-4 py-2 bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 text-white font-extrabold text-2xl tracking-wider rounded-2xl shadow-2xl border-2 border-yellow-200 whitespace-nowrap"
+          >
+            💥 KABOOM!
+          </motion.div>
+
+          {/* Radial explosive debris particles */}
+          {[
+            { angle: 0, dist: 110, icon: '💥' },
+            { angle: 25, dist: 140, icon: '🔥' },
+            { angle: 50, dist: 95, icon: '💨' },
+            { angle: 75, dist: 130, icon: '✨' },
+            { angle: 100, dist: 105, icon: '💔' },
+            { angle: 130, dist: 150, icon: '💥' },
+            { angle: 160, dist: 120, icon: '🔥' },
+            { angle: 190, dist: 135, icon: '💨' },
+            { angle: 220, dist: 115, icon: '⚡' },
+            { angle: 250, dist: 145, icon: '💥' },
+            { angle: 280, dist: 100, icon: '🔥' },
+            { angle: 310, dist: 130, icon: '💨' },
+            { angle: 335, dist: 125, icon: '✨' },
+          ].map((part, i) => {
+            const rad = (part.angle * Math.PI) / 180;
+            const targetX = Math.cos(rad) * part.dist;
+            const targetY = Math.sin(rad) * part.dist;
+            return (
+              <motion.div
+                key={i}
+                initial={{ x: 0, y: 0, scale: 0.6, opacity: 1 }}
+                animate={{
+                  x: targetX,
+                  y: targetY,
+                  scale: [0.6, 1.3, 0.4],
+                  opacity: [1, 1, 0],
+                  rotate: Math.random() * 360,
+                }}
+                transition={{ duration: 0.75, ease: 'easeOut' }}
+                className="absolute text-xl sm:text-2xl select-none"
+              >
+                {part.icon}
+              </motion.div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
